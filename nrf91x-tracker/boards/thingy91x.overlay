@@ -1,0 +1,23 @@
+/*
+ * Thingy:91X device tree overlay
+ *
+ * Enables BME688 on the I2C bus used by the board.
+ * Adjust the i2c node alias if your NCS board definition differs.
+ */
+
+/ {
+    chosen {
+        nordic,pm-ext-flash = &mx25r64;
+    };
+};
+
+/* BME688 environmental sensor */
+&i2c2 {
+    status = "okay";
+
+    bme688: bme688@76 {
+        compatible = "bosch,bme680";
+        reg = <0x76>;
+        label = "BME688";
+    };
+};

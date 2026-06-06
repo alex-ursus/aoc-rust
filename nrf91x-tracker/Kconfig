@@ -1,0 +1,10 @@
+mainmenu "nRF91X Location Tracker"
+
+config TRACKER_TLS_SEC_TAG
+    int "TLS security tag for AWS CA certificate"
+    default 1
+    help
+      Modem security tag used to store the AWS root CA certificate.
+      Must be unique on this device. Range 0–2147483647.
+
+source "Kconfig.zephyr"

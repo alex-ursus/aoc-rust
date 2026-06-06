@@ -1,0 +1,6 @@
+# Never commit real secrets
+src/aws_config.h
+
+# NCS/Zephyr build artefacts
+build/
+.west/

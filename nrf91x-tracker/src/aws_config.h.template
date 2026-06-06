@@ -1,0 +1,27 @@
+/*
+ * Copy this file to aws_config.h and fill in your values.
+ * aws_config.h is git-ignored; never commit real secrets.
+ */
+#ifndef AWS_CONFIG_H
+#define AWS_CONFIG_H
+
+/* Hostname only — no scheme, no trailing slash */
+#define AWS_LAMBDA_HOST   "xxxxxxxxxx.execute-api.eu-west-1.amazonaws.com"
+
+/* URL path including stage, e.g. "/prod/tracker" */
+#define AWS_LAMBDA_PATH   "/prod/tracker"
+
+/* Bearer token value (without "Bearer " prefix — that's added in code) */
+#define AWS_AUTH_TOKEN    "your-secret-token-here"
+
+/*
+ * AWS root CA certificate (Amazon Root CA 1 PEM).
+ * Download from: https://www.amazontrust.com/repository/AmazonRootCA1.pem
+ * Paste the full PEM block below as a C string literal.
+ */
+#define AWS_CA_CERT \
+    "-----BEGIN CERTIFICATE-----\n" \
+    "... paste Amazon Root CA 1 here ...\n" \
+    "-----END CERTIFICATE-----\n"
+
+#endif /* AWS_CONFIG_H */
