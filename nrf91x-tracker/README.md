@@ -7,15 +7,23 @@ JSON location payload to an AWS Lambda HTTPS endpoint.
 
 | Component | Role |
 |-----------|------|
-| nRF9161 SiP | LTE-M/NB-IoT modem + GNSS |
-| nRF5340 SoC | Application processor + BLE 5.4 scanner |
+| nRF9151 SiP | LTE-M/NB-IoT + GNSS + DECT NR+ (modem) |
+| nRF5340 SoC | Application processor + Bluetooth 5.4 |
+| nRF7002 IC | WiFi 6 companion — 2.4 GHz + 5 GHz passive scanning |
 | BME688 | Temperature, humidity, pressure, gas resistance |
 | Button 1 | Triggers fast-mode |
 | LED 1 | Fast-mode indicator |
 
-> **Note:** The Thingy:91X has no WiFi hardware. WiFi AP scanning is not
-> possible. The firmware scans nearby BLE advertisements instead, which covers
-> BLE beacons, IoT sensors, phones, and other BLE devices.
+### Architecture note
+
+The **nRF5340** is the application processor. It has direct hardware access to
+the nRF7002 (WiFi) and native BLE. The **nRF9151** runs as a dedicated modem
+and is accessed from the nRF5340 via IPC — NCS handles this transparently when
+you target `thingy91x/nrf5340/cpuapp`. You can use all `lte_lc`, `nrf_modem_gnss`,
+and `modem_key_mgmt` APIs as normal; the IPC shim is invisible to application code.
+
+The nRF7002 and nRF5340 BLE **share the 2.4/5 GHz antenna** via an RF switch.
+`CONFIG_MPSL_CX_NRF700X=y` enables coexistence so they do not interfere.
 
 ## Behaviour
 
@@ -25,10 +33,11 @@ JSON location payload to an AWS Lambda HTTPS endpoint.
 | Fast | 10 s | Button 1 press → 10 min, then auto-revert |
 
 Each report cycle:
-1. Acquire GNSS fix (up to 30 s timeout; sends `null` location if no fix)
-2. Passive BLE scan for 5 s
-3. Read BME688 (temperature, humidity, pressure, gas resistance)
-4. POST JSON to AWS Lambda over TLS 1.2
+1. Acquire GNSS fix (up to 30 s timeout; sends `null` if no fix)
+2. Passive WiFi scan on 2.4 GHz + 5 GHz via nRF7002 (15 s timeout)
+3. Passive BLE scan via nRF5340 (5 s)
+4. Read BME688 (temperature, humidity, pressure, gas resistance)
+5. POST JSON to AWS Lambda over TLS 1.2
 
 ## JSON Payload
 
@@ -46,6 +55,10 @@ Each report cycle:
     "heading": 0.00,
     "satellites": 9
   },
+  "wifi": [
+    { "bssid": "AA:BB:CC:DD:EE:FF", "ssid": "MyNetwork", "rssi": -65, "channel": 6, "band": 2 },
+    { "bssid": "11:22:33:44:55:66", "ssid": "OfficeWifi", "rssi": -72, "channel": 36, "band": 5 }
+  ],
   "bluetooth": [
     { "mac": "AA:BB:CC:DD:EE:FF", "rssi": -72, "name": "MyBeacon", "adv_type": 0 }
   ],
@@ -58,7 +71,10 @@ Each report cycle:
 }
 ```
 
-The `Authorization: Bearer <token>` header is added on every request.
+The `Authorization: Bearer <token>` header is sent on every request. WiFi
+BSSID+RSSI data can be fed into a geolocation service (Google Maps Geolocation
+API, Here, or your own fingerprint DB) on the Lambda side for indoor/urban
+location refinement when GNSS is weak.
 
 ## Prerequisites
 
@@ -87,7 +103,8 @@ The `Authorization: Bearer <token>` header is added on every request.
 
 ```bash
 # From inside the nrf91x-tracker directory
-west build -b thingy91x/nrf9161 -- -DEXTRA_CONF_FILE=boards/thingy91x.conf
+# Target: nRF5340 application core (has WiFi + BLE; modem accessed via IPC)
+west build -b thingy91x/nrf5340/cpuapp -- -DEXTRA_CONF_FILE=boards/thingy91x.conf
 
 # Flash over J-Link (USB cable attached)
 west flash
@@ -96,15 +113,13 @@ west flash
 ### Serial monitor
 
 ```bash
-# /dev/ttyACM0 is typical; adjust as needed
+# /dev/ttyACM0 is typical on Linux; adjust as needed
 minicom -D /dev/ttyACM0 -b 115200
 # or
 screen /dev/ttyACM0 115200
 ```
 
 ## AWS Lambda — minimal handler
-
-Your Lambda just needs to receive POST with JSON body and validate the header:
 
 ```python
 import json
@@ -115,15 +130,16 @@ def handler(event, context):
         return {"statusCode": 401, "body": "Unauthorized"}
 
     body = json.loads(event.get("body", "{}"))
-    # Store body in DynamoDB / S3 / etc.
+    # body["wifi"] contains BSSID+RSSI for WiFi geolocation
+    # body["location"] contains GNSS fix
+    # body["bluetooth"] contains nearby BLE devices
+    # body["environment"] contains BME688 readings
     print(json.dumps(body))
 
     return {"statusCode": 200, "body": "OK"}
 ```
 
-Use API Gateway HTTP API (not REST API) with a Lambda proxy integration and
-enable HTTPS only. The Thingy:91X will validate the server certificate against
-the Amazon Root CA you provisioned.
+Use API Gateway HTTP API with a Lambda proxy integration and HTTPS only.
 
 ## Tuning
 
@@ -132,6 +148,8 @@ the Amazon Root CA you provisioned.
 | `INTERVAL_NORMAL_S` | 60 | `tracker.h` |
 | `INTERVAL_FAST_S` | 10 | `tracker.h` |
 | `FAST_MODE_DURATION_S` | 600 | `tracker.h` |
+| `WIFI_SCAN_TIMEOUT_S` | 15 | `tracker.h` |
+| `WIFI_MAX_APS` | 20 | `tracker.h` |
 | `BLE_SCAN_DURATION_S` | 5 | `tracker.h` |
 | `BLE_MAX_DEVICES` | 20 | `tracker.h` |
 | GNSS fix timeout | 30 s | `main.c` `do_report()` |

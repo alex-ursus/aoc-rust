@@ -36,7 +36,6 @@ static void fast_mode_countdown_handler(struct k_work *work)
         atomic_set(&fast_mode_remaining_s, 0);
         set_led_fast_mode(false);
         LOG_INF("Fast mode ended, returning to %ds interval", INTERVAL_NORMAL_S);
-        /* Reschedule the report loop at normal cadence */
         k_work_reschedule(&report_work, K_SECONDS(INTERVAL_NORMAL_S));
     }
 }
@@ -53,7 +52,6 @@ static void button_handler(uint32_t button_state, uint32_t has_changed)
     atomic_set(&fast_mode_remaining_s, FAST_MODE_DURATION_S);
     set_led_fast_mode(true);
 
-    /* Fire immediately, then continue at fast cadence */
     k_work_reschedule(&report_work, K_NO_WAIT);
     k_work_schedule(&fast_mode_countdown_work, K_SECONDS(1));
 }
@@ -74,7 +72,6 @@ static void do_report(struct k_work *work)
     /* Device ID from modem IMEI — populated once at boot, reused each cycle */
     static char device_id[32] = { 0 };
     if (device_id[0] == '\0') {
-        /* Best-effort; falls back to literal string if modem not ready */
         strncpy(device_id, "thingy91x-unknown", sizeof(device_id) - 1);
     }
     strncpy(payload.device_id, device_id, sizeof(payload.device_id) - 1);
@@ -83,19 +80,25 @@ static void do_report(struct k_work *work)
     bool fast = atomic_get(&fast_mode_remaining_s) > 0;
     payload.interval_s = fast ? INTERVAL_FAST_S : INTERVAL_NORMAL_S;
 
-    /* GNSS */
+    /* GNSS — up to 30 s; sends null location if no fix */
     err = gnss_module_get_fix(&payload.gnss, K_SECONDS(30));
     if (err) {
-        LOG_WRN("GNSS fix failed (%d), sending without location", err);
+        LOG_WRN("GNSS fix failed (%d), continuing without location", err);
     }
 
-    /* BLE scan */
+    /* WiFi AP scan via nRF7002 */
+    err = wifi_scanner_scan(&payload.wifi, WIFI_SCAN_TIMEOUT_S);
+    if (err) {
+        LOG_WRN("WiFi scan failed (%d)", err);
+    }
+
+    /* BLE scan via nRF5340 */
     err = ble_scanner_scan(&payload.ble, BLE_SCAN_DURATION_S);
     if (err) {
         LOG_WRN("BLE scan failed (%d)", err);
     }
 
-    /* Environmental sensor */
+    /* Environmental sensor (BME688) */
     err = sensor_module_read(&payload.env);
     if (err) {
         LOG_WRN("Sensor read failed (%d)", err);
@@ -106,12 +109,11 @@ static void do_report(struct k_work *work)
     if (err) {
         LOG_ERR("HTTP POST failed (%d)", err);
     } else {
-        LOG_INF("Payload sent OK (lat=%.6f lon=%.6f temp=%.1f ble=%d)",
+        LOG_INF("Sent OK — lat=%.6f lon=%.6f temp=%.1f wifi=%d ble=%d",
                 payload.gnss.latitude, payload.gnss.longitude,
-                payload.env.temperature, payload.ble.count);
+                payload.env.temperature, payload.wifi.count, payload.ble.count);
     }
 
-    /* Schedule next report */
     k_work_schedule(&report_work,
                     K_SECONDS(fast ? INTERVAL_FAST_S : INTERVAL_NORMAL_S));
 }
@@ -163,10 +165,15 @@ int main(void)
 
     LOG_INF("nRF91X location tracker starting");
 
-    /* Init subsystems */
     err = gnss_module_init();
     if (err) {
         LOG_ERR("GNSS init failed (%d)", err);
+        return err;
+    }
+
+    err = wifi_scanner_init();
+    if (err) {
+        LOG_ERR("WiFi init failed (%d)", err);
         return err;
     }
 
@@ -205,17 +212,14 @@ int main(void)
         return err;
     }
 
-    /* Sync clock via modem */
     err = date_time_update_async(NULL);
     if (err) {
-        LOG_WRN("Date/time sync failed (%d), timestamps may be wrong", err);
+        LOG_WRN("Date/time sync failed (%d)", err);
     }
 
-    /* Start report loop */
     k_work_init_delayable(&report_work, do_report);
     k_work_init_delayable(&fast_mode_countdown_work, fast_mode_countdown_handler);
 
-    /* Fire first report immediately */
     k_work_schedule(&report_work, K_NO_WAIT);
 
     return 0;

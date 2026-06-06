@@ -62,7 +62,19 @@ static int build_json(const struct tracker_payload *p, char *buf, size_t buf_siz
         APPEND("\"location\":null,");
     }
 
-    /* BLE devices */
+    /* WiFi APs (nRF7002 scan) */
+    APPEND("\"wifi\":[");
+    for (int i = 0; i < p->wifi.count; i++) {
+        const struct wifi_ap *ap = &p->wifi.aps[i];
+        APPEND("%s{\"bssid\":\"%s\",\"ssid\":\"%s\",\"rssi\":%d,"
+               "\"channel\":%u,\"band\":%u}",
+               i > 0 ? "," : "",
+               ap->bssid, ap->ssid, (int)ap->rssi,
+               ap->channel, ap->band);
+    }
+    APPEND("],");
+
+    /* BLE devices (nRF5340 scan) */
     APPEND("\"bluetooth\":[");
     for (int i = 0; i < p->ble.count; i++) {
         const struct ble_device *d = &p->ble.devices[i];
