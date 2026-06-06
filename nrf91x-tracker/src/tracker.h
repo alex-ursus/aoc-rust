@@ -17,6 +17,10 @@
 #define WIFI_SCAN_TIMEOUT_S     15
 #define WIFI_MAX_APS            20
 
+/* ---- Cell tower scan (nRF9151 modem) ----------------------------------- */
+#define CELL_MEAS_TIMEOUT_S     10
+#define CELL_MAX_NEIGHBORS      8
+
 /* ---- Payload structures ------------------------------------------------ */
 
 struct gnss_data {
@@ -55,20 +59,51 @@ struct wifi_scan_data {
     int count;
 };
 
+struct cell_tower_serving {
+    uint16_t mcc;             /* Mobile Country Code */
+    uint16_t mnc;             /* Mobile Network Code */
+    uint32_t tac;             /* Tracking Area Code */
+    uint32_t cell_id;         /* E-UTRAN Cell ID */
+    uint32_t earfcn;          /* E-ARFCN (frequency) */
+    uint16_t pci;             /* Physical Cell ID */
+    int16_t  rsrp_dbm;        /* Signal strength (dBm) */
+    int16_t  rsrq_db;         /* Signal quality (dB) */
+    uint16_t timing_advance;  /* Distance proxy (us) */
+    bool     valid;
+};
+
+struct cell_tower_neighbor {
+    uint32_t earfcn;
+    uint16_t pci;
+    int16_t  rsrp_dbm;
+    int16_t  rsrq_db;
+    int32_t  time_diff;       /* Timing difference vs serving cell */
+};
+
+struct cell_scan_data {
+    struct cell_tower_serving  serving;
+    struct cell_tower_neighbor neighbors[CELL_MAX_NEIGHBORS];
+    int                        neighbor_count;
+};
+
 struct env_data {
-    double  temperature;    /* °C */
-    double  humidity;       /* % RH */
-    double  pressure;       /* hPa */
-    double  gas_resistance; /* Ω  (air quality proxy) */
-    bool    valid;
+    double   temperature;    /* °C */
+    double   humidity;       /* % RH */
+    double   pressure;       /* hPa */
+    double   gas_resistance; /* Ω  (air quality proxy) */
+    uint8_t  battery_pct;    /* 0–100 % state of charge (nPM1300) */
+    uint16_t battery_mv;     /* Terminal voltage in mV */
+    bool     battery_valid;
+    bool     valid;
 };
 
 struct tracker_payload {
     char                    device_id[32];
     int64_t                 timestamp;      /* Unix epoch seconds */
     struct gnss_data        gnss;
-    struct ble_scan_result  ble;
+    struct cell_scan_data   cells;
     struct wifi_scan_data   wifi;
+    struct ble_scan_result  ble;
     struct env_data         env;
     int                     interval_s;     /* current reporting interval */
 };
@@ -86,6 +121,10 @@ int  ble_scanner_scan(struct ble_scan_result *out, uint32_t duration_s);
 /* wifi_scanner.c */
 int  wifi_scanner_init(void);
 int  wifi_scanner_scan(struct wifi_scan_data *out, uint32_t timeout_s);
+
+/* cell_scanner.c */
+int  cell_scanner_init(void);
+int  cell_scanner_measure(struct cell_scan_data *out, k_timeout_t timeout);
 
 /* sensor_module.c */
 int  sensor_module_init(void);

@@ -86,6 +86,12 @@ static void do_report(struct k_work *work)
         LOG_WRN("GNSS fix failed (%d), continuing without location", err);
     }
 
+    /* Cell tower measurement via nRF9151 modem */
+    err = cell_scanner_measure(&payload.cells, K_SECONDS(CELL_MEAS_TIMEOUT_S));
+    if (err) {
+        LOG_WRN("Cell measurement failed (%d)", err);
+    }
+
     /* WiFi AP scan via nRF7002 */
     err = wifi_scanner_scan(&payload.wifi, WIFI_SCAN_TIMEOUT_S);
     if (err) {
@@ -109,9 +115,11 @@ static void do_report(struct k_work *work)
     if (err) {
         LOG_ERR("HTTP POST failed (%d)", err);
     } else {
-        LOG_INF("Sent OK — lat=%.6f lon=%.6f temp=%.1f wifi=%d ble=%d",
+        LOG_INF("Sent OK — lat=%.6f lon=%.6f temp=%.1f cells=%d wifi=%d ble=%d",
                 payload.gnss.latitude, payload.gnss.longitude,
-                payload.env.temperature, payload.wifi.count, payload.ble.count);
+                payload.env.temperature,
+                payload.cells.neighbor_count + (payload.cells.serving.valid ? 1 : 0),
+                payload.wifi.count, payload.ble.count);
     }
 
     k_work_schedule(&report_work,
@@ -174,6 +182,12 @@ int main(void)
     err = wifi_scanner_init();
     if (err) {
         LOG_ERR("WiFi init failed (%d)", err);
+        return err;
+    }
+
+    err = cell_scanner_init();
+    if (err) {
+        LOG_ERR("Cell scanner init failed (%d)", err);
         return err;
     }
 

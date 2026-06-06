@@ -11,6 +11,7 @@ JSON location payload to an AWS Lambda HTTPS endpoint.
 | nRF5340 SoC | Application processor + Bluetooth 5.4 |
 | nRF7002 IC | WiFi 6 companion — 2.4 GHz + 5 GHz passive scanning |
 | BME688 | Temperature, humidity, pressure, gas resistance |
+| nPM1300 PMIC | Fuel gauge — battery state of charge (%) + voltage (mV) |
 | Button 1 | Triggers fast-mode |
 | LED 1 | Fast-mode indicator |
 
@@ -34,10 +35,12 @@ The nRF7002 and nRF5340 BLE **share the 2.4/5 GHz antenna** via an RF switch.
 
 Each report cycle:
 1. Acquire GNSS fix (up to 30 s timeout; sends `null` if no fix)
-2. Passive WiFi scan on 2.4 GHz + 5 GHz via nRF7002 (15 s timeout)
-3. Passive BLE scan via nRF5340 (5 s)
-4. Read BME688 (temperature, humidity, pressure, gas resistance)
-5. POST JSON to AWS Lambda over TLS 1.2
+2. Cell tower measurement via nRF9151 modem — serving cell + up to 8 neighbors (10 s timeout)
+3. Passive WiFi scan on 2.4 GHz + 5 GHz via nRF7002 (15 s timeout)
+4. Passive BLE scan via nRF5340 (5 s)
+5. Read BME688 (temperature, humidity, pressure, gas resistance)
+6. Read BME688 + nPM1300 fuel gauge (battery %, voltage mV)
+7. POST JSON to AWS Lambda over TLS 1.2
 
 ## JSON Payload
 
@@ -46,6 +49,17 @@ Each report cycle:
   "device_id": "thingy91x-unknown",
   "timestamp": 1749225600,
   "interval_s": 60,
+  "cell_towers": {
+    "serving": {
+      "mcc": 234, "mnc": 30, "tac": 12345, "cell_id": 67890,
+      "earfcn": 1300, "pci": 42, "rsrp_dbm": -85, "rsrq_db": -10,
+      "timing_advance": 3
+    },
+    "neighbors": [
+      { "earfcn": 1300, "pci": 43, "rsrp_dbm": -94, "rsrq_db": -13, "time_diff": 12 },
+      { "earfcn": 1300, "pci": 44, "rsrp_dbm": -101, "rsrq_db": -16, "time_diff": 27 }
+    ]
+  },
   "location": {
     "latitude": 51.507400,
     "longitude": -0.127800,
@@ -66,15 +80,20 @@ Each report cycle:
     "temperature": 22.45,
     "humidity": 48.20,
     "pressure": 1013.25,
-    "gas_resistance": 45230
+    "gas_resistance": 45230,
+    "battery_pct": 78,
+    "battery_mv": 3920
   }
 }
 ```
 
-The `Authorization: Bearer <token>` header is sent on every request. WiFi
-BSSID+RSSI data can be fed into a geolocation service (Google Maps Geolocation
-API, Here, or your own fingerprint DB) on the Lambda side for indoor/urban
-location refinement when GNSS is weak.
+The `Authorization: Bearer <token>` header is sent on every request.
+
+**Multi-source location**: GNSS gives the best accuracy outdoors. Cell tower
+MCC/MNC/TAC/Cell-ID + RSRP can be fed to Google Maps Geolocation API, Here, or
+OpenCelliD when GNSS is unavailable indoors. WiFi BSSIDs+RSSI provide
+sub-50m accuracy in urban environments. All three sources are in every payload
+so your Lambda can apply whichever is available.
 
 ## Prerequisites
 
@@ -148,6 +167,8 @@ Use API Gateway HTTP API with a Lambda proxy integration and HTTPS only.
 | `INTERVAL_NORMAL_S` | 60 | `tracker.h` |
 | `INTERVAL_FAST_S` | 10 | `tracker.h` |
 | `FAST_MODE_DURATION_S` | 600 | `tracker.h` |
+| `CELL_MEAS_TIMEOUT_S` | 10 | `tracker.h` |
+| `CELL_MAX_NEIGHBORS` | 8 | `tracker.h` |
 | `WIFI_SCAN_TIMEOUT_S` | 15 | `tracker.h` |
 | `WIFI_MAX_APS` | 20 | `tracker.h` |
 | `BLE_SCAN_DURATION_S` | 5 | `tracker.h` |

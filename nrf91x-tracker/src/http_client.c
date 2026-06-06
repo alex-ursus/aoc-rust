@@ -62,6 +62,31 @@ static int build_json(const struct tracker_payload *p, char *buf, size_t buf_siz
         APPEND("\"location\":null,");
     }
 
+    /* Cell towers (nRF9151 modem neighbor measurement) */
+    if (p->cells.serving.valid) {
+        const struct cell_tower_serving *s = &p->cells.serving;
+        APPEND("\"cell_towers\":{"
+               "\"serving\":{"
+               "\"mcc\":%u,\"mnc\":%u,\"tac\":%u,\"cell_id\":%u,"
+               "\"earfcn\":%u,\"pci\":%u,\"rsrp_dbm\":%d,\"rsrq_db\":%d,"
+               "\"timing_advance\":%u"
+               "},",
+               s->mcc, s->mnc, s->tac, s->cell_id,
+               s->earfcn, s->pci, s->rsrp_dbm, s->rsrq_db,
+               s->timing_advance);
+        APPEND("\"neighbors\":[");
+        for (int i = 0; i < p->cells.neighbor_count; i++) {
+            const struct cell_tower_neighbor *n = &p->cells.neighbors[i];
+            APPEND("%s{\"earfcn\":%u,\"pci\":%u,\"rsrp_dbm\":%d,"
+                   "\"rsrq_db\":%d,\"time_diff\":%d}",
+                   i > 0 ? "," : "",
+                   n->earfcn, n->pci, n->rsrp_dbm, n->rsrq_db, n->time_diff);
+        }
+        APPEND("]},");
+    } else {
+        APPEND("\"cell_towers\":null,");
+    }
+
     /* WiFi APs (nRF7002 scan) */
     APPEND("\"wifi\":[");
     for (int i = 0; i < p->wifi.count; i++) {
@@ -84,16 +109,20 @@ static int build_json(const struct tracker_payload *p, char *buf, size_t buf_siz
     }
     APPEND("],");
 
-    /* Environment */
+    /* Environment + battery */
     if (p->env.valid) {
         APPEND("\"environment\":{"
                "\"temperature\":%.2f,"
                "\"humidity\":%.2f,"
                "\"pressure\":%.2f,"
-               "\"gas_resistance\":%.0f"
-               "}",
+               "\"gas_resistance\":%.0f",
                p->env.temperature, p->env.humidity,
                p->env.pressure, p->env.gas_resistance);
+        if (p->env.battery_valid) {
+            APPEND(",\"battery_pct\":%u,\"battery_mv\":%u",
+                   p->env.battery_pct, p->env.battery_mv);
+        }
+        APPEND("}");
     } else {
         APPEND("\"environment\":null");
     }

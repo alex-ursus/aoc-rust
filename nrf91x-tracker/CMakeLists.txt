@@ -6,6 +6,7 @@ project(nrf91x_tracker)
 target_sources(app PRIVATE
     src/main.c
     src/ble_scanner.c
+    src/cell_scanner.c
     src/gnss_module.c
     src/wifi_scanner.c
     src/http_client.c
